@@ -6,44 +6,64 @@ from cocotb.triggers import RisingEdge, ClockCycles, Timer
 async def test_project(dut):
     dut._log.info("Start 4-bit counter test")
 
-    # Start clock
+    # Start clock: 10us period
     cocotb.start_soon(Clock(dut.clk, 10, units="us").start())
 
-    # Init inputs
-    dut.ena.value = 1
+    # Initialize inputs
+    dut.ena.value = 1          # TinyTapeout project select
+    dut.ui_in.value = 0        # user enable = 0
     dut.uio_in.value = 0
-    dut.ui_in.value = 0
 
-    # Hold reset low for a few full cycles (very important)
+    # Let signals settle
+    await Timer(1, units="ns")
+
+    # ---- INITIAL SANITY CHECK ----
+    dut._log.info(
+        f"INIT: ena={dut.ena.value} rst_n={dut.rst_n.value} "
+        f"ui_in={dut.ui_in.value} uo_out={dut.uo_out.value}"
+    )
+
+    # Fail immediately if ena is not actually high
+    assert int(dut.ena.value) == 1, f"ena is NOT 1 (ena={dut.ena.value})"
+
+    # ---- RESET ----
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 3)
-
-    # Release reset cleanly between edges
+    await ClockCycles(dut.clk, 3)   # hold reset for multiple real cycles
     dut.rst_n.value = 1
     await Timer(1, units="ns")
 
-    # Sanity print after reset release
-    dut._log.info(f"After reset release: rst_n={dut.rst_n.value} ui_in={dut.ui_in.value} uo_out={dut.uo_out.value}")
+    dut._log.info(
+        f"After reset release: ena={dut.ena.value} rst_n={dut.rst_n.value} "
+        f"ui_in={dut.ui_in.value} uo_out={dut.uo_out.value}"
+    )
 
-    # Enable counting and settle before the next edge
-    dut.ui_in.value = 1
+    # ---- ENABLE COUNTING ----
+    dut.ui_in.value = 1             # ui_in[0] = enable
     await Timer(1, units="ns")
 
-    dut._log.info(f"Before counting edge: rst_n={dut.rst_n.value} ui_in={dut.ui_in.value} uo_out={dut.uo_out.value}")
+    dut._log.info(
+        f"Before counting edge: ena={dut.ena.value} rst_n={dut.rst_n.value} "
+        f"ui_in={dut.ui_in.value} uo_out={dut.uo_out.value}"
+    )
 
-    # Wait one rising edge: should increment 0 -> 1
+    # ---- FIRST COUNT EDGE ----
     await RisingEdge(dut.clk)
-    await Timer(1, units="ns")  # let signals update after edge
-    count = int(dut.uo_out.value) & 0x0F
+    await Timer(1, units="ns")
 
-    dut._log.info(f"After 1st count edge: uo_out={dut.uo_out.value} count={count}")
+    count = int(dut.uo_out.value) & 0x0F
+    dut._log.info(
+        f"After 1st count edge: ena={dut.ena.value} "
+        f"uo_out={dut.uo_out.value} count={count}"
+    )
 
     assert count == 1, f"Expected 1, got {count}"
 
-    # Next few counts
+    # ---- CONTINUE COUNTING ----
     for expected in range(2, 6):
         await RisingEdge(dut.clk)
         await Timer(1, units="ns")
         count = int(dut.uo_out.value) & 0x0F
-        dut._log.info(f"Expected {expected}, got {count}, uo_out={dut.uo_out.value}")
+        dut._log.info(
+            f"Expected {expected}, got {count}, uo_out={dut.uo_out.value}"
+        )
         assert count == expected, f"Expected {expected}, got {count}"
